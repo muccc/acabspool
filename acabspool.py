@@ -1,3 +1,20 @@
+# acabspool - spooling daemon for the AllColoursAreBeautiful project
+# Copyright (C) 2010 Raphael Mancini <sepisultrum@hcl-club.lu>
+#                    Franz Pletz <fpletz@fnordicwalking.de>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 import os
 import sys
 import time
@@ -27,8 +44,9 @@ def send_animation(s, a):
 
     for frame in a.get_data():
         if frame['duration'] != duration:
-            duration = frame['duration']
+            duration = int(frame['duration'])
             s.send(struct.pack('!III', header | op_duration, 8+4, duration))
+            print duration
 
         d = struct.pack('!II', header | op_set_screen,
                         8 + a.height * a.width * a.depth / 8 * a.channels)
@@ -38,11 +56,11 @@ def send_animation(s, a):
 
         s.send(d)
 
-        s.send(struct.pack('!II', header | op_flip, 8))
+        #s.send(struct.pack('!II', header | op_flip, 8))
 
 def main():
-    s = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
-    s.connect(('localhost', 43948))
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.connect(('10.11', 43948))
 
     try:
         while 0xacab:
@@ -65,7 +83,7 @@ def main():
 
                 send_animation(s, a)
 
-                time.sleep(a.max_duration)
+                time.sleep(a.max_duration/1000.0)
 
                 a.playing = False
                 a.save()
