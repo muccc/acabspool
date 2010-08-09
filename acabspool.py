@@ -27,6 +27,7 @@ os.environ['DJANGO_SETTINGS_MODULE'] = 'acabed.settings'
 
 from acabed.acab import models
 
+# klingon ack
 ACK = u'\xf8\xe2\xf8\xe6\xf8\xd6'
 
 log = lambda s: sys.stdout.write(s + '\n')
