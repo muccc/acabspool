@@ -30,16 +30,20 @@ from acabed.acab import models
 # klingon ack
 ACK = u'\xf8\xe2\xf8\xe6\xf8\xd6'
 
-log = lambda s: sys.stdout.write(s + '\n')
+header = 0x00009000
+op_duration = 0x0a
+op_set_screen = 0x11
+op_flip = 0x12
 
+log = lambda s: sys.stdout.write(s + '\n')
 
 def ntos(n):
     if n > 0:
         return chr(n % 256) + ntos(n/256)
     return ''
 
-
 def send_animation(s, a):
+    elapsed = 0
     duration = -1
     header = 0x00009000
     op_duration = 0x0a
@@ -49,38 +53,42 @@ def send_animation(s, a):
 
     data = json.loads(a.data)
     last = data[-1]
-    for frame in data:
-        if frame['duration'] != duration:
-            duration = int(frame['duration'])
-            s.send(struct.pack('!III', header | op_duration, 8+4, duration))
-            print duration
 
-        mask = 0
-        if frame == last:
-            mask = mask_ack
+    while a.max_duration*1000 > elapsed:
+        for frame in data:
+            if frame['duration'] != duration:
+                duration = int(frame['duration'])
+                s.send(struct.pack('!III', header | op_duration, 8+4, duration))
+                print duration
 
-        d = struct.pack('!II', header | op_set_screen | mask,
-                        8 + a.height * a.width * a.depth / 8 * a.channels)
-        for r in frame['rows']:
-            for i in xrange(len(r)/2):
-                d += (chr(int(r[i*2:][:2], 16)))
+            mask = 0
+            if frame == last:
+                mask = mask_ack
 
-        s.send(d)
-        s.send(struct.pack('!II', header | op_flip, 8))
+            d = struct.pack('!II', header | op_set_screen | mask,
+                            8 + a.height * a.width * a.depth / 8 * a.channels)
+            for r in frame['rows']:
+                for i in xrange(len(r)/2):
+                    d += (chr(int(r[i*2:][:2], 16)))
 
-    # wait for ack
-    response = ''
+            s.send(d)
+            s.send(struct.pack('!II', header | op_flip, 8))
+            
+            elapsed += duration
 
-    while len(response) <= 6:
-        response += s.recv(6)
+        # wait for ack
+        response = ''
 
-    if response != ACK:
-        log('ERROR: no ack?!')
+        while len(response) <= 6:
+            response += s.recv(6)
+
+        if response != ACK:
+            log('ERROR: no ack?!')
 
 
 def main():
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.connect(('localhost', 43948))
+    s.connect(('127.1', 43948))
 
     try:
         while 0xacab:
@@ -103,7 +111,7 @@ def main():
 
                 send_animation(s, a)
 
-                time.sleep(a.max_duration/1000.0)
+                time.sleep(a.max_duration)
 
                 a.playing = False
                 a.save()
