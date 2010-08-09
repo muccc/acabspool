@@ -20,11 +20,14 @@ import sys
 import time
 import socket
 import struct
+import json
 
-sys.path = ['..'] + sys.path
+sys.path = ['..','../acabed'] + sys.path
 os.environ['DJANGO_SETTINGS_MODULE'] = 'acabed.settings'
 
-from acabed.animations import models
+from acabed.acab import models
+
+ACK = u'\xf8\xe2\xf8\xe6\xf8\xd6'
 
 log = lambda s: sys.stdout.write(s + '\n')
 
@@ -41,26 +44,42 @@ def send_animation(s, a):
     op_duration = 0x0a
     op_set_screen = 0x11
     op_flip = 0x12
+    mask_ack = 0x00000100
 
-    for frame in a.get_data():
+    data = json.loads(a.data)
+    last = data[-1]
+    for frame in data:
         if frame['duration'] != duration:
             duration = int(frame['duration'])
             s.send(struct.pack('!III', header | op_duration, 8+4, duration))
             print duration
 
-        d = struct.pack('!II', header | op_set_screen,
+        mask = 0
+        if frame == last:
+            mask = mask_ack
+
+        d = struct.pack('!II', header | op_set_screen | mask,
                         8 + a.height * a.width * a.depth / 8 * a.channels)
         for r in frame['rows']:
             for i in xrange(len(r)/2):
                 d += (chr(int(r[i*2:][:2], 16)))
 
         s.send(d)
+        s.send(struct.pack('!II', header | op_flip, 8))
 
-        #s.send(struct.pack('!II', header | op_flip, 8))
+    # wait for ack
+    response = ''
+
+    while len(response) <= 6:
+        response += s.recv(6)
+
+    if response != ACK:
+        log('ERROR: no ack?!')
+
 
 def main():
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.connect(('10.11', 43948))
+    s.connect(('localhost', 43948))
 
     try:
         while 0xacab:
@@ -97,7 +116,7 @@ def main():
 
     s.close()
 
-        
+
 def daemonize():
     try:
         pid = os.fork()
