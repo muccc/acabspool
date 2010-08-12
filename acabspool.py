@@ -28,7 +28,8 @@ os.environ['DJANGO_SETTINGS_MODULE'] = 'acabed.settings'
 from acabed.acab import models
 
 # klingon ack
-ACK = u'\xf8\xe2\xf8\xe6\xf8\xd6'
+#ACK = '\xf8\xe2\xf8\xe6\xf8\xd6'
+ACK = 'ackack'
 
 header = 0x00009000
 op_duration = 0x0a
@@ -54,7 +55,8 @@ def send_animation(s, a):
     data = json.loads(a.data)
     last = data[-1]
 
-    while a.max_duration*1000 > elapsed:
+    #while a.max_duration > elapsed:
+    if True:
         for frame in data:
             if frame['duration'] != duration:
                 duration = int(frame['duration'])
@@ -72,18 +74,18 @@ def send_animation(s, a):
                     d += (chr(int(r[i*2:][:2], 16)))
 
             s.send(d)
-            s.send(struct.pack('!II', header | op_flip, 8))
+            #s.send(struct.pack('!II', header | op_flip, 8))
             
             elapsed += duration
 
         # wait for ack
         response = ''
 
-        while len(response) <= 6:
+        while len(response) < 6:
             response += s.recv(6)
+            print response
 
-        if response != ACK:
-            log('ERROR: no ack?!')
+        log('next')
 
 
 def main():
@@ -91,12 +93,18 @@ def main():
     s.connect(('127.1', 43948))
 
     try:
+        playlists = None
         while 0xacab:
             job = models.SpoolJob.current()
 
-            if job == None:
-                log('no job in spool, randomly picking a playlist')
-                playlist = models.Playlist.objects.order_by('?')[0]
+            if len(sys.argv) == 2 and sys.argv[1] == 'PATEN':
+                log('PATEN')
+                playlist = models.Playlist.objects.get(title='PIXELPATEN')
+            elif job == None:
+                #log('no job in spool, randomly picking a playlist')
+                if playlists is None or playlists == []:
+                    playlists = list(models.Playlist.objects.order_by('?'))
+                playlist = playlists.pop()
             else:
                 log('working on job: %s' % str(job))
                 playlist = job.playlist
@@ -110,8 +118,6 @@ def main():
                 log('playing %s' % str(a))
 
                 send_animation(s, a)
-
-                time.sleep(a.max_duration)
 
                 a.playing = False
                 a.save()
