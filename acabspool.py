@@ -28,8 +28,7 @@ os.environ['DJANGO_SETTINGS_MODULE'] = 'acabed.settings'
 from acabed.acab import models
 
 # klingon ack
-#ACK = '\xf8\xe2\xf8\xe6\xf8\xd6'
-ACK = 'ackack'
+ACK = '\xf8\xe2\xf8\xe6\xf8\xd6'
 
 header = 0x00009000
 op_duration = 0x0a
@@ -58,10 +57,11 @@ def send_animation(s, a):
     #while a.max_duration > elapsed:
     if True:
         for frame in data:
-            if frame['duration'] != duration:
-                duration = int(frame['duration'])
+            new_duration = int(frame['duration'])*1000
+            if new_duration != duration:
+                duration = new_duration
                 s.send(struct.pack('!III', header | op_duration, 8+4, duration))
-                print duration
+                log(str(duration))
 
             mask = 0
             if frame == last:
@@ -81,9 +81,9 @@ def send_animation(s, a):
         # wait for ack
         response = ''
 
-        while len(response) < 6:
-            response += s.recv(6)
-            print response
+        while len(response) < len(ACK):
+            response += s.recv(len(ACK)-len(response))
+            log(response)
 
         log('next')
 
