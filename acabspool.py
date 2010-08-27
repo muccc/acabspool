@@ -29,6 +29,7 @@ from acabed.acab import models
 
 # klingon ack
 ACK = '\xf8\xe2\xf8\xe6\xf8\xd6'
+ack_wait = False
 
 header = 0x00009000
 op_duration = 0x0a
@@ -43,6 +44,7 @@ def ntos(n):
     return ''
 
 def send_animation(s, a):
+    global ack_wait
     elapsed = 0
     duration = -1
     header = 0x00009000
@@ -56,16 +58,18 @@ def send_animation(s, a):
 
     #while a.max_duration > elapsed:
     if True:
-        for frame in data:
-            new_duration = int(frame['duration'])*1000
+        for i in xrange(len(data)):
+            frame = data[i]
+            new_duration = int(frame['duration'])*750
             if new_duration != duration:
                 duration = new_duration
                 s.send(struct.pack('!III', header | op_duration, 8+4, duration))
                 log(str(duration))
 
             mask = 0
-            if frame == last:
+            if i == len(data)-1:
                 mask = mask_ack
+                ack_wait = True
 
             d = struct.pack('!II', header | op_set_screen | mask,
                             8 + a.height * a.width * a.depth / 8 * a.channels)
@@ -78,17 +82,10 @@ def send_animation(s, a):
             
             elapsed += duration
 
-        # wait for ack
-        response = ''
-
-        while len(response) < len(ACK):
-            response += s.recv(len(ACK)-len(response))
-            log(response)
-
-        log('next')
 
 
 def main():
+    global ack_wait
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.connect(('127.1', 43948))
 
@@ -112,11 +109,22 @@ def main():
             log('playlist: %s' % str(playlist))
             
             for a in playlist.animations.all():
+                # wait for ack
+                if ack_wait:
+                    response = ''
+
+                    while len(response) < len(ACK):
+                        response += s.recv(len(ACK)-len(response))
+                        log(response)
+
+                    log('next')
+
+                    ack_wait = False
+
                 a.playing = True
                 a.save()
 
                 log('playing %s' % str(a))
-
                 send_animation(s, a)
 
                 a.playing = False
