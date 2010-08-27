@@ -1,5 +1,5 @@
 # acabspool - spooling daemon for the AllColoursAreBeautiful project
-# Copyright (C) 2010 Raphael Mancini <sepisultrum@hcl-club.lu>
+# Copyright (C) 2010 Raffael Mancini <raffael.mancini@hcl-club.lu>
 #                    Franz Pletz <fpletz@fnordicwalking.de>
 #
 # This program is free software: you can redistribute it and/or modify
