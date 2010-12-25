@@ -1,6 +1,7 @@
 # acabspool - spooling daemon for the AllColoursAreBeautiful project
 # Copyright (C) 2010 Raffael Mancini <raffael.mancini@hcl-club.lu>
 #                    Franz Pletz <fpletz@fnordicwalking.de>
+#                    Sebastian Steuer <iggy@zxzy.de>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -395,7 +396,7 @@ def main():
     
         #Forwarder("", 50023, "127.0.0.1", 43948)
         kiosk.StreamRequest.objects.restore()
-        RequestListener("", 50023)
+        RequestListener(STREAMER_HOST, STREAMER_PORT)
         asyncore.loop(5,use_poll = True)
     except KeyboardInterrupt:
         exit()
