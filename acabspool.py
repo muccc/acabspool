@@ -50,7 +50,8 @@ MESSAGE_HELLO = 'Welcome to the acabspooler!'
 MESSAGE_ALLOWED = 'MOAR\n'
 MESSAGE_DENIED = 'GTFO\n'
 MESSAGE_ERROR = "ERROR\n"
-MESSAGE_NOT_ALLOWED = "NOT ALLWED\n"
+MESSAGE_NOT_ALLOWED = "BUSY\n"
+MESSAGE_ABORT = "ABORT\n"
 
 GIGARGOYLE_IP = "127.0.0.1"
 GIGARGOYLE_PORT = 43948
@@ -225,16 +226,18 @@ class Receiver(asyncore.dispatcher):
         spooler.start()
 
 class Sender(asyncore.dispatcher):
-    def __init__(self, receiver, remoteaddr,remoteport, request):
+    def __init__(self, receiver, remoteaddr,remoteport, handler):
         asyncore.dispatcher.__init__(self)
         self.receiver=receiver
         receiver.sender=self
-        self.request = request
+        self.handler = handler
         self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
         self.connect((remoteaddr, remoteport))
-        self.request.state = kiosk.STREAM_PLAYING
-        self.request.save()
-        log("Forwarder: Streaming %s by %s"%(self.request.title,self.request.author))
+        self.handler.request.state = kiosk.STREAM_PLAYING
+        self.handler.request.save()
+        
+        History.objects.push_stream(self.handler.request)
+        log("Forwarder: Streaming %s by %s"%(self.handler.request.title,self.handler.request.author))
         
     def handle_connect(self):
         pass
@@ -245,6 +248,23 @@ class Sender(asyncore.dispatcher):
         self.receiver.to_remote_buffer += read
 
     def writable(self):
+        try:
+            self.handler.request = kiosk.StreamRequest.objects.get(id = self.handler.request.id)
+        except kiosk.StreamRequest.DoesNotExist:
+            #self.send(MESSAGE_ERROR)
+            self.receiver.handle_close()
+            self.close()
+            self.handler.handle_close()
+            return
+        
+        if self.handler.request.state == kiosk.STREAM_ABORT:
+            log ("Forwarder: Aborted stream %s by %s"%(self.handler.request.title,self.handler.request.author))
+            #self.send("MESSAGE_ABORT")
+            self.close()
+            self.receiver.handle_close()
+            self.handler.handle_close()
+            return
+        
         return (len(self.receiver.from_remote_buffer) > 0)
 
     def handle_write(self):
@@ -352,14 +372,15 @@ class RequestHandler(asyncore.dispatcher):
             spooler.join()
             
             #Forward to gigargoyle
-            Sender(Receiver(self),GIGARGOYLE_IP,GIGARGOYLE_PORT, self.request)   
+            Sender(Receiver(self),GIGARGOYLE_IP,GIGARGOYLE_PORT, self)   
         
         if self.request.state == kiosk.STREAM_DENIED:
             log ("RequestHandler: Denied stream %s by %s"%(self.args["TITLE"],self.args["AUTHOR"]))
             self.send("MESSAGE_DENIED")
             self.close()
             return
-
+        
+        
                
 def daemonize():
     try:
