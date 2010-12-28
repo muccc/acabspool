@@ -392,6 +392,7 @@ class RequestHandler(asyncore.dispatcher):
             log("SPOOLER CLOSED")
             
             #Forward to gigargoyle
+            time.sleep(1)
             self.forwarder = Sender(Receiver(self),GIGARGOYLE_IP,GIGARGOYLE_PORT, self)   
         
         if self.request.state == kiosk.STREAM_DENIED:
