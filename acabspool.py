@@ -201,6 +201,7 @@ class Receiver(asyncore.dispatcher):
     
     def handle_read(self):
         read = self.recv(4096)
+            
         #print '%04i -->'%len(read)
         self.from_remote_buffer += read
 
@@ -213,10 +214,12 @@ class Receiver(asyncore.dispatcher):
         self.to_remote_buffer = self.to_remote_buffer[sent:]
 
     def handle_close(self):
+        log("Receiver: handle close")
         #print "close"
         self.close()
         if self.sender:
-            self.sender.close()
+            self.sender.handle_close()
+            self.senfer = None
             
         #restart the spooler
         global spooler
@@ -243,14 +246,19 @@ class Sender(asyncore.dispatcher):
         pass
 
     def handle_read(self):
+        #try:
         read = self.recv(4096)
-        #print '<-- %04i'%len(read)
         self.receiver.to_remote_buffer += read
+        #except socket.error:
+        #    log("Forwarder (sender) socket error during read")
+        #print '<-- %04i'%len(read)
+        
 
     def writable(self):
         try:
             self.handler.request = kiosk.StreamRequest.objects.get(id = self.handler.request.id)
         except kiosk.StreamRequest.DoesNotExist:
+            log("Forwarder: Stream Does not exist!")
             #self.send(MESSAGE_ERROR)
             self.receiver.handle_close()
             self.close()
@@ -273,10 +281,17 @@ class Sender(asyncore.dispatcher):
         self.receiver.from_remote_buffer = self.receiver.from_remote_buffer[sent:]
 
     def handle_close(self):
+        log("Sender : handle close")
+        if self.handler:
+            self.handler.forwarder = None
+            self.handler.handle_close()
+            self.handler = None
+        if self.receiver:
+            self.receiver.sender = None
+            self.receiver.handle_close()
+            self.receiver = None
         self.close()
-        if self.receiver():
-            self.receiver.close()
-
+        
 class RequestListener(asyncore.dispatcher):
     def __init__(self, ip, port):
         asyncore.dispatcher.__init__(self)
@@ -300,6 +315,7 @@ class RequestHandler(asyncore.dispatcher):
         self.args = {}
         self.conn = None
         self.addr = None
+        self.forwarder = None
         self.done = False
         self.request = kiosk.StreamRequest.push_new_request()
         log("RequestHandler: started")
@@ -308,6 +324,9 @@ class RequestHandler(asyncore.dispatcher):
         if self.request:
             self.request.state = kiosk.STREAM_FINISHED
             self.request.save()
+        if self.forwarder:
+            self.forwarder.handle_close()
+            self.forwarder = None
         self.close()
         log ("RequestHandler: closed")
     
@@ -345,7 +364,9 @@ class RequestHandler(asyncore.dispatcher):
     
     def _check_state(self):
         #kind of a state machine
-        
+        #from guppy import hpy
+        #h = hpy()
+        #print h.heap()
         
         if not self.request:
             self.send(MESSAGE_NOT_ALLOWED)
@@ -370,9 +391,10 @@ class RequestHandler(asyncore.dispatcher):
             #kill the spooler
             global spooler
             spooler.join()
+            log("SPOOLER CLOSED")
             
             #Forward to gigargoyle
-            Sender(Receiver(self),GIGARGOYLE_IP,GIGARGOYLE_PORT, self)   
+            self.forwarder = Sender(Receiver(self),GIGARGOYLE_IP,GIGARGOYLE_PORT, self)   
         
         if self.request.state == kiosk.STREAM_DENIED:
             log ("RequestHandler: Denied stream %s by %s"%(self.args["TITLE"],self.args["AUTHOR"]))
