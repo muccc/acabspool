@@ -222,6 +222,7 @@ class Receiver(asyncore.dispatcher):
             self.senfer = None
             
         #restart the spooler
+        time.sleep(1)
         global spooler
         global spooler_exit 
         spooler_exit = False
@@ -260,17 +261,14 @@ class Sender(asyncore.dispatcher):
         except kiosk.StreamRequest.DoesNotExist:
             log("Forwarder: Stream Does not exist!")
             #self.send(MESSAGE_ERROR)
-            self.receiver.handle_close()
-            self.close()
-            self.handler.handle_close()
+            
+            self.handle_close()
             return
         
         if self.handler.request.state == kiosk.STREAM_ABORT:
             log ("Forwarder: Aborted stream %s by %s"%(self.handler.request.title,self.handler.request.author))
             #self.send("MESSAGE_ABORT")
-            self.close()
-            self.receiver.handle_close()
-            self.handler.handle_close()
+            self.handle_close()
             return
         
         return (len(self.receiver.from_remote_buffer) > 0)
