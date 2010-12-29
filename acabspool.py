@@ -54,8 +54,8 @@ MESSAGE_NOT_ALLOWED = "BUSY\n"
 MESSAGE_ABORT = "ABORT\n"
 
 GIGARGOYLE_IP = "127.0.0.1"
-GIGARGOYLE_PORT = 43948
-
+GIGARGOYLE_SPOOLER_PORT = 43948
+GIGARGOYLE_STREAMER_PORT = 44203
 STREAMER_HOST = ''
 STREAMER_PORT = 50023
 
@@ -70,7 +70,6 @@ def ntos(n):
 class Spooler(threading.Thread):
     def __init__(self):
         self.socket = None
-        self._stopevent = threading.Event()
         self.ack_wait = False
         threading.Thread.__init__(self, name="spooler")
         
@@ -117,7 +116,7 @@ class Spooler(threading.Thread):
     def run(self):
         #global ack_wait
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket.connect((GIGARGOYLE_IP, GIGARGOYLE_PORT))
+        self.socket.connect((GIGARGOYLE_IP, GIGARGOYLE_SPOOLER_PORT))
         log('Spooler: Started')
         try:
             playlists = None
@@ -137,21 +136,20 @@ class Spooler(threading.Thread):
     
                 log('Spooler: playlist: %s' % str(playlist))
                 for a in playlist.animations.all():
-                    if spooler_exit:
-                        #print "STOP"
-                        raise
+                    
                     # wait for ack
                     if self.ack_wait:
+                        log ("Spooler: waiting for ack")
                         response = ''
     
                         while len(response) < len(ACK):
                             response += self.socket.recv(len(ACK)-len(response))
-                            #log(response)
+                            #log("r: "+response)
     
-                        log('Spooler: next')
+                        log('Spooler: ack received')
     
                         self.ack_wait = False
-    
+                    
                     a.playing = True
                     a.save()
                     
@@ -176,17 +174,10 @@ class Spooler(threading.Thread):
     
         except KeyboardInterrupt:
             pass
-        except:        
-            pass
     
         self.socket.close()
         log('Spooler: Closing')
         
-    def join(self,timeout=None):   
-        #self._stopevent.set()
-        global spooler_exit
-        spooler_exit = True
-        threading.Thread.join(self, timeout)
 
 class Receiver(asyncore.dispatcher):
     def __init__(self,conn):
@@ -201,8 +192,7 @@ class Receiver(asyncore.dispatcher):
     
     def handle_read(self):
         read = self.recv(4096)
-            
-        #print '%04i -->'%len(read)
+        #log("Forwarder: %04i -->"%read)
         self.from_remote_buffer += read
 
     def writable(self):
@@ -210,24 +200,15 @@ class Receiver(asyncore.dispatcher):
 
     def handle_write(self):
         sent = self.send(self.to_remote_buffer)
-        #print '%04i <--'%sent
+        #log("Forwarder: %04i <--"%sent)
         self.to_remote_buffer = self.to_remote_buffer[sent:]
 
     def handle_close(self):
         log("Receiver: handle close")
-        #print "close"
-        self.close()
         if self.sender:
             self.sender.handle_close()
-            self.senfer = None
-            
-        #restart the spooler
-        time.sleep(1)
-        global spooler
-        global spooler_exit 
-        spooler_exit = False
-        spooler = Spooler()
-        spooler.start()
+            self.sender = None
+        self.close()
 
 class Sender(asyncore.dispatcher):
     def __init__(self, receiver, remoteaddr,remoteport, handler):
@@ -386,14 +367,7 @@ class RequestHandler(asyncore.dispatcher):
         
         if self.request.state == kiosk.STREAM_ALLOWED:
             log ("RequestHandler: Initiating stream %s by %s"%(self.args["TITLE"],self.args["AUTHOR"]))
-            #kill the spooler
-            global spooler
-            spooler.join()
-            log("SPOOLER CLOSED")
-            
-            #Forward to gigargoyle
-            time.sleep(1)
-            self.forwarder = Sender(Receiver(self),GIGARGOYLE_IP,GIGARGOYLE_PORT, self)   
+            self.forwarder = Sender(Receiver(self),GIGARGOYLE_IP,GIGARGOYLE_STREAMER_PORT, self)   
         
         if self.request.state == kiosk.STREAM_DENIED:
             log ("RequestHandler: Denied stream %s by %s"%(self.args["TITLE"],self.args["AUTHOR"]))
