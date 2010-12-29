@@ -85,11 +85,12 @@ class Spooler(asyncore.dispatcher):
         
     def handle_read(self):
         read = self.recv(4096)
+        print "read:"+read
         #log("Forwarder: %04i -->"%read)
         self.rx_buffer += read
         if len(self.rx_buffer) >= len(ACK):
-               self.ack_received = True
-               self.rx_buffer = ''
+            self.ack_received = True
+            self.rx_buffer = ''
 
     def writable(self):
         self._check_state()
@@ -331,6 +332,8 @@ class RequestHandler(asyncore.dispatcher):
             self.forwarder.handle_close()
             self.forwarder = None
         self.close()
+        spooler.ack_wait = False
+        
         log ("RequestHandler: closed")
     
     def handle_connect(self):
@@ -430,6 +433,7 @@ def daemonize():
 
 def main():
     #Setup the spooler and streamer
+    global spooler
     spooler = Spooler(GIGARGOYLE_IP, GIGARGOYLE_SPOOLER_PORT)
     streamer = RequestListener(STREAMER_HOST, STREAMER_PORT)
     
@@ -438,7 +442,7 @@ def main():
     
     #loop through all the dispatchers
     try:
-        asyncore.loop(5,use_poll = True)
+        asyncore.loop(1,use_poll = True)
     except KeyboardInterrupt:
         spooler.handle_close()
         streamer.handle_close()
