@@ -67,13 +67,45 @@ def ntos(n):
 
 
 
-class Spooler(threading.Thread):
-    def __init__(self):
-        self.socket = None
-        self.ack_wait = False
-        threading.Thread.__init__(self, name="spooler")
+class Spooler(asyncore.dispatcher):
+    def __init__(self,addr, port):
+        asyncore.dispatcher.__init__(self)
         
-    def send_animation(self, s, a):
+        self.ack_wait = False
+        self.ack_received = True
+        self.tx_buffer = ''
+        self.rx_buffer = ''
+        self.playlists = None
+        self.playlist = None
+        
+        self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.connect((addr, port))
+        log('Spooler: Started')
+        
+        
+    def handle_read(self):
+        read = self.recv(4096)
+        #log("Forwarder: %04i -->"%read)
+        self.rx_buffer += read
+        if len(self.rx_buffer) >= len(ACK):
+               self.ack_received = True
+               self.rx_buffer = ''
+
+    def writable(self):
+        self._check_state()
+        
+        return (len(self.tx_buffer) > 0)
+
+    def handle_write(self):
+        sent = self.send(self.tx_buffer)
+        #log("Forwarder: %04i <--"%sent)
+        self.tx_buffer = self.tx_buffer[sent:]
+    
+    def handle_close(self):
+        self.close()
+        log('Spooler: Closing')
+        
+    def send_animation(self, a):
         #global ack_wait
         elapsed = 0
         duration = -1
@@ -85,98 +117,90 @@ class Spooler(threading.Thread):
     
         data = json.loads(a.data)
         last = data[-1]
-        #while a.max_duration > elapsed:
-        if True:
-            for i in xrange(len(data)):
-                if spooler_exit:
-                    #print "stop spooler"
-                    return
-                frame = data[i]
-                new_duration = int(frame['duration'])*750
-                if new_duration != duration:
-                    duration = new_duration
-                    s.send(struct.pack('!III', header | op_duration, 8+4, duration))
-                    #log(str(duration))
-    
-                mask = 0
-                if i == len(data)-1:
-                    mask = mask_ack
-                    self.ack_wait = True
-    
-                d = struct.pack('!II', header | op_set_screen | mask,
-                                8 + a.height * a.width * a.depth / 8 * a.channels)
-                for r in frame['rows']:
-                    for i in xrange(len(r)/2):
-                        d += (chr(int(r[i*2:][:2], 16)))
-                s.send(d)
-                #s.send(struct.pack('!II', header | op_flip, 8))
+
+        for i in xrange(len(data)):
+            if spooler_exit:
+                #print "stop spooler"
+                return
+            frame = data[i]
+            new_duration = int(frame['duration'])*750
+            if new_duration != duration:
+                duration = new_duration
+                self.tx_buffer+=(struct.pack('!III', header | op_duration, 8+4, duration))
+                #log(str(duration))
+
+            mask = 0
+            if i == len(data)-1:
+                mask = mask_ack
+                self.ack_wait = True
+
+            d = struct.pack('!II', header | op_set_screen | mask,
+                            8 + a.height * a.width * a.depth / 8 * a.channels)
+            for r in frame['rows']:
+                for i in xrange(len(r)/2):
+                    d += (chr(int(r[i*2:][:2], 16)))
+            self.tx_buffer += d
+            #s.send(struct.pack('!II', header | op_flip, 8))
+            
+            elapsed += duration    
                 
-                elapsed += duration    
-                
-    def run(self):
-        #global ack_wait
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket.connect((GIGARGOYLE_IP, GIGARGOYLE_SPOOLER_PORT))
-        log('Spooler: Started')
-        try:
-            playlists = None
-            while 0xacab:
-                job = models.SpoolJob.current()
-                if len(sys.argv) == 2 and sys.argv[1] == 'PATEN':
-                    log('Spooler: PATEN')
-                    playlist = models.Playlist.objects.get(title='PIXELPATEN')
-                elif job == None:
-                    #log('no job in spool, randomly picking a playlist')
-                    if playlists is None or playlists == []:
-                        playlists = list(models.Playlist.objects.order_by('?'))
-                    playlist = playlists.pop()
+    def _check_state(self):
+        
+        #Setup job, playlist
+        job = models.SpoolJob.current()
+        if len(sys.argv) == 2 and sys.argv[1] == 'PATEN':
+            log('Spooler: PATEN')
+            self.playlist = models.Playlist.objects.get(title='PIXELPATEN')
+            
+        elif job == None:
+            #log('no job in spool, randomly picking a playlist')
+            if self.playlists is None or self.playlists == []:
+                self.playlists = list(models.Playlist.objects.order_by('?'))
+            if self.playlist is None:
+                self.playlist = self.playlists.pop()
+        else:
+            log('Spooler: working on job: %s' % str(job))
+            self.playlist = job.playlist
+
+        log('Spooler: playlist: %s' % str(self.playlist))
+        for a in self.playlist.animations.all():
+            
+            # wait for ack
+            if self.ack_wait:
+                log ("Spooler: waiting for ack")
+                if self.ack_received:
+                    log('Spooler: ack received')
+                    self.ack_wait = False
+                    self.ack_received = False
                 else:
-                    log('Spooler: working on job: %s' % str(job))
-                    playlist = job.playlist
+                    log('Spooler: ack not received')
+                    return
+                
+            a.playing = True
+            a.save()
+            
+            #get the animation instance and push it to the history
+            try:
+                ai = models.AnimationInstance.objects.get(playlist = self.playlist, animation = a)
+                History.objects.push_movie(ai)
+            except History.DoesNotExist:
+                pass
+                
+            
+            log('Spooler: Playing animaton %s' % str(a))
+            
+            self.send_animation(a)
+
+            a.playing = False
+            a.save()
+        
+        if job != None:
+            log('Spooler: deleting playlist %s' % str(self.playlist))
+            job.delete()
+        else:
+            self.playlist = self.playlists.pop()
     
-                log('Spooler: playlist: %s' % str(playlist))
-                for a in playlist.animations.all():
-                    
-                    # wait for ack
-                    if self.ack_wait:
-                        log ("Spooler: waiting for ack")
-                        response = ''
-    
-                        while len(response) < len(ACK):
-                            response += self.socket.recv(len(ACK)-len(response))
-                            #log("r: "+response)
-    
-                        log('Spooler: ack received')
-    
-                        self.ack_wait = False
-                    
-                    a.playing = True
-                    a.save()
-                    
-                    #get the animation instance and push it to the history
-                    try:
-                        ai = models.AnimationInstance.objects.get(playlist = playlist, animation = a)
-                        History.objects.push_movie(ai)
-                    except History.DoesNotExist:
-                        pass
-                        
-                    
-                    log('Spooler: Playing animaton %s' % str(a))
-                    
-                    self.send_animation(self.socket, a)
-    
-                    a.playing = False
-                    a.save()
-    
-                if job != None:
-                    log('Spooler: deleting playlist %s' % str(playlist))
-                    job.delete()
-    
-        except KeyboardInterrupt:
-            pass
-    
-        self.socket.close()
-        log('Spooler: Closing')
+        
         
 
 class Receiver(asyncore.dispatcher):
@@ -405,16 +429,19 @@ def daemonize():
 
 
 def main():
-    try:
-        global spooler
-        spooler = Spooler()
-        spooler.start()
+    #Setup the spooler and streamer
+    spooler = Spooler(GIGARGOYLE_IP, GIGARGOYLE_SPOOLER_PORT)
+    streamer = RequestListener(STREAMER_HOST, STREAMER_PORT)
     
-        #Forwarder("", 50023, "127.0.0.1", 43948)
-        kiosk.StreamRequest.objects.restore()
-        RequestListener(STREAMER_HOST, STREAMER_PORT)
+    #Clean the db from old requests
+    kiosk.StreamRequest.objects.restore()
+    
+    #loop through all the dispatchers
+    try:
         asyncore.loop(5,use_poll = True)
     except KeyboardInterrupt:
+        spooler.handle_close()
+        streamer.handle_close()
         exit()
         
 if __name__ == '__main__':
